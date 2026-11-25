@@ -2,12 +2,12 @@
 
 Original decision ratified 2026-11-25: distinct implementation identity, protected main and founder-specific review. Founder amendment: "i understand the concerns of claude, but in this initial stage we are only going to implement the core account. If we get to a stoppage or problem, we will convert to a new bifurcated account structure."
 
-The following is the complete implementation-policy wording recorded in the conversation, not a verbatim founder quotation:
+**Status:** ratified (Rev. 1). The text below is the amendment as the founder issued it for review (FR-003 I-08: matched sentence for sentence); relabelled in PUSH 003 under the founder's PUSH 003 authorization, ledger event ARC-EVO-0031.
 
 # D-002 Rev. 1 — Progressive Implementation Authority
 
 **Date:** November 25, 2026  
-**Status:** Founder-authorized amendment  
+**Status (as issued):** Founder-authorized amendment  
 **Supersedes:** Original D-002 identity separation requirement
 
 ## Decision
