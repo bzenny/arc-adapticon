@@ -3,8 +3,8 @@
 Scout runs exactly three read-only Git plumbing commands (see ALLOWED_COMMANDS)
 against an explicit local Git directory. It never checks out, reads file
 contents into its own logic, follows symlinks or gitlinks, or runs repository
-code. Trust boundary: trusted local fixtures; this is not a sandbox for hostile
-repositories.
+code. Trust boundary: trusted, self-contained local fixtures on POSIX; this is
+not a sandbox for hostile repositories and not a network-isolation guarantee.
 """
 
 from __future__ import annotations
@@ -12,11 +12,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
 import tempfile
-import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,6 +38,12 @@ FULL_SHA1 = re.compile(r"[0-9a-f]{40}")
 GIT_GLOBAL_OPTIONS = (
     "--no-replace-objects",
     "-c", "protocol.allow=never",
+    "-c", "protocol.file.allow=never",
+    "-c", "protocol.git.allow=never",
+    "-c", "protocol.ssh.allow=never",
+    "-c", "protocol.http.allow=never",
+    "-c", "protocol.https.allow=never",
+    "-c", "protocol.ext.allow=never",
     "-c", "credential.helper=",
     "-c", "core.fsmonitor=false",
     "-c", "core.hooksPath=/dev/null",
@@ -54,7 +61,7 @@ LIMITATIONS = (
     "Metadata only: file contents are not read into Scout and are not assessed.",
     "Symlinks and gitlinks are listed but never followed; submodule contents are not inspected.",
     "Git reads objects internally to report blob sizes; Scout does not claim zero object access.",
-    "Trust boundary: trusted local Git directories; this is not a sandbox for hostile repositories.",
+    "Trust boundary: trusted, self-contained local Git directories on POSIX; not a sandbox for hostile repositories.",
     "Only SHA-1 object storage is supported in schema 0.1.0.",
     "License, dependency and runtime assessments are not performed.",
 )
@@ -122,46 +129,68 @@ class GitRunner:
         except PermissionError:
             raise ScoutError("git_not_found", "Git executable is not runnable") from None
 
-        out = bytearray()
-        err = bytearray()
-        over = threading.Event()
-        cap = self.limits.max_git_output_bytes
-
-        def read_out() -> None:
-            while chunk := proc.stdout.read(65536):
-                if len(out) + len(chunk) > cap:
-                    over.set()
-                    _kill_group(proc)
-                    break
-                out.extend(chunk)
-
-        def read_err() -> None:
-            while chunk := proc.stderr.read(65536):
-                if len(err) < MAX_STDERR_BYTES:
-                    err.extend(chunk[: MAX_STDERR_BYTES - len(err)])
-
-        readers = [threading.Thread(target=read_out), threading.Thread(target=read_err)]
-        for t in readers:
-            t.start()
-        timed_out = False
         try:
-            code = proc.wait(timeout=self.limits.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _kill_group(proc)
-            code = proc.wait()
+            out, err, code = self._collect(proc, args[0])
         finally:
-            for t in readers:
-                t.join()
-            proc.stdout.close()
-            proc.stderr.close()
-        if timed_out:
-            raise ScoutError("timeout", f"git {args[0]} exceeded {self.limits.timeout_seconds} s")
-        if over.is_set():
-            raise ScoutError("output_limit", f"git {args[0]} output exceeded {cap} bytes")
+            for pipe in (proc.stdout, proc.stderr):
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
         if code != 0:
             raise _GitFailure(args[0], code, bytes(err))
         return bytes(out)
+
+    def _collect(self, proc: subprocess.Popen, sub: str) -> tuple[bytes, bytes, int]:
+        """Read both pipes until EOF and reap Git, all within one absolute deadline.
+
+        A descendant that keeps a pipe open after Git exits cannot extend the
+        deadline: at expiry the whole process group is killed and Scout stops
+        reading, whether or not the descendant has exited.
+        """
+        deadline = time.monotonic() + self.limits.timeout_seconds
+        cap = self.limits.max_git_output_bytes
+        out, err = bytearray(), bytearray()
+        fds = {proc.stdout.fileno(): out, proc.stderr.fileno(): err}
+        for fd in fds:
+            os.set_blocking(fd, False)
+        while fds:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _terminate(proc)
+                raise ScoutError("timeout", f"git {sub} exceeded {self.limits.timeout_seconds} s")
+            ready, _, _ = select.select(list(fds), [], [], remaining)
+            for fd in ready:
+                try:
+                    chunk = os.read(fd, 65536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    del fds[fd]
+                    continue
+                buf = fds[fd]
+                if buf is out:
+                    if len(out) + len(chunk) > cap:
+                        _terminate(proc)
+                        raise ScoutError("output_limit", f"git {sub} output exceeded {cap} bytes")
+                    out.extend(chunk)
+                elif len(err) < MAX_STDERR_BYTES:
+                    err.extend(chunk[: MAX_STDERR_BYTES - len(err)])
+        try:
+            code = proc.wait(timeout=max(deadline - time.monotonic(), 0.001))
+        except subprocess.TimeoutExpired:
+            _terminate(proc)
+            raise ScoutError("timeout", f"git {sub} exceeded {self.limits.timeout_seconds} s") from None
+        return bytes(out), bytes(err), code
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    """Kill Git's process group and reap Git without waiting indefinitely."""
+    _kill_group(proc)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -223,16 +252,87 @@ def resolve_git_dir(git_dir: str | os.PathLike) -> Path:
     return path.resolve()
 
 
-def reject_partial_clone(git_dir: Path) -> None:
-    """Refuse promisor/partial repositories: missing objects could trigger fetches."""
+_SECTION = re.compile(r'\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\](.*)')
+_KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
+
+
+def parse_git_config(data: bytes) -> list[tuple[str, str | None, str, str | None]]:
+    """Parse Git config text into (section, subsection, key, raw value) tuples.
+
+    Deliberately small and strict: anything it cannot parse is rejected rather
+    than guessed. Section and key names are lower-cased; ``[a.b]`` gives
+    subsection ``b``.
+    """
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ScoutError("config_unsupported", "subject config is not UTF-8") from None
+    lines = text.splitlines()
+    items: list[tuple[str, str | None, str, str | None]] = []
+    section: tuple[str, str | None] | None = None
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        while line.endswith("\\") and i + 1 < len(lines):  # value continuation
+            i += 1
+            line = line[:-1] + lines[i].strip()
+        i += 1
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("["):
+            m = _SECTION.fullmatch(line)
+            if m is None:
+                raise ScoutError("config_unsupported", "unparseable section header in subject config")
+            name, sub, rest = m.group(1).lower(), m.group(2), m.group(3).strip()
+            if sub is None and "." in name:
+                name, sub = name.split(".", 1)
+            section = (name, sub)
+            if not rest or rest[0] in "#;":
+                continue
+            line = rest
+        if section is None:
+            raise ScoutError("config_unsupported", "subject config has a key outside any section")
+        m = _KEY.fullmatch(line)
+        if m is None:
+            raise ScoutError("config_unsupported", "unparseable line in subject config")
+        items.append((section[0], section[1], m.group(1).lower(), m.group(2)))
+    return items
+
+
+def check_config(items: list[tuple[str, str | None, str, str | None]]) -> None:
+    """Reject configuration outside the trusted-fixture profile."""
+    for section, sub, key, _ in items:
+        if section in ("include", "includeif"):
+            raise ScoutError("config_include_unsupported", "subject config uses include or includeIf")
+        if (section == "extensions" and key == "partialclone") or key in ("promisor", "partialclonefilter"):
+            raise ScoutError("partial_clone_unsupported", "partial-clone or promisor configuration present")
+        if section == "extensions" and key != "objectformat":
+            raise ScoutError("config_unsupported", f"repository extension not supported: {key}")
+        if section == "protocol":
+            raise ScoutError("config_unsupported", "subject config sets protocol policy")
+
+
+def check_layout(git_dir: Path) -> None:
+    """Accept only a self-contained bare repository or a non-linked ``.git`` directory."""
+    if not (git_dir / "HEAD").is_file():
+        raise ScoutError("not_a_git_dir", "no HEAD file; not a Git directory")
+    if (git_dir / "commondir").exists() or (git_dir / "config.worktree").exists():
+        raise ScoutError("unsupported_layout", "linked worktree or per-worktree config is not supported")
+    if not (git_dir / "objects").is_dir():
+        raise ScoutError("not_a_git_dir", "no objects directory; not a Git directory")
+    if (git_dir / "objects").is_symlink():
+        raise ScoutError("unsupported_layout", "objects directory is a symlink")
+    info = git_dir / "objects" / "info"
+    for name in ("alternates", "http-alternates"):
+        if (info / name).exists():
+            raise ScoutError("alternates_unsupported", "alternate object stores are not supported")
     pack = git_dir / "objects" / "pack"
     if pack.is_dir() and any(p.suffix == ".promisor" for p in pack.iterdir()):
-        raise ScoutError("partial_clone_unsupported", "Promisor packs present; partial clones are not supported")
+        raise ScoutError("partial_clone_unsupported", "promisor packs present; partial clones are not supported")
     config = git_dir / "config"
-    if config.is_file():
-        text = config.read_bytes().lower()
-        if b"partialclone" in text or b"promisor" in text:
-            raise ScoutError("partial_clone_unsupported", "Partial-clone configuration present; not supported")
+    if config.is_symlink() or not config.is_file():
+        raise ScoutError("unsupported_layout", "config missing or a symlink")
+    check_config(parse_git_config(config.read_bytes()))
 
 
 def output_inside_subject(output: Path, git_dir: Path) -> bool:
@@ -251,7 +351,7 @@ def classify_path(raw: bytes, limits: Limits) -> tuple[str | None, str | None]:
         return None, "path_not_utf8"
     if len(raw) > limits.max_path_bytes:
         return text, "path_too_long"
-    if raw.startswith(b"/") or b"\\" in raw or any(b < 0x20 or b == 0x7F for b in raw):
+    if raw.startswith(b"/") or b"\\" in raw or b":" in raw or any(b < 0x20 or b == 0x7F for b in raw):
         return text, "unsafe_path"
     for part in raw.split(b"/"):
         if part in (b"", b".", b"..") or part.lower() == b".git":
@@ -301,6 +401,15 @@ def parse_ls_tree(data: bytes, limits: Limits) -> list[dict]:
         if reason:
             entry["omission_reason"] = reason
         entries.append((raw_path, entry))
+    raw_paths = [raw for raw, _ in entries]
+    seen = set(raw_paths)
+    if len(seen) != len(raw_paths):
+        raise ScoutError("malformed_tree", "tree lists the same path more than once")
+    for raw in raw_paths:
+        parts = raw.split(b"/")
+        for k in range(1, len(parts)):
+            if b"/".join(parts[:k]) in seen:
+                raise ScoutError("malformed_tree", "tree lists a path as both a file and a directory")
     entries.sort(key=lambda e: e[0])
     return [e for _, e in entries]
 
@@ -314,8 +423,11 @@ def inventory(
     runner_factory=GitRunner,
 ) -> dict:
     """Return the canonical manifest for ``commit`` or raise ScoutError."""
+    if os.name != "posix":
+        raise ScoutError("unsupported_platform", "Scout P004 supports POSIX systems only")
     git = find_git(git_executable)
     gdir = resolve_git_dir(git_dir)
+    check_layout(gdir)  # before any Git call: Git reads the subject config itself
     runner = runner_factory(git, str(gdir), limits)
 
     try:
@@ -326,7 +438,6 @@ def inventory(
         raise ScoutError("unsupported_object_format", "SHA-256 repositories are not supported in schema 0.1.0")
     if fmt != "sha1":
         raise ScoutError("unsupported_object_format", "unrecognized object format")
-    reject_partial_clone(gdir)
 
     if not isinstance(commit, str) or not FULL_SHA1.fullmatch(commit):
         raise ScoutError("invalid_commit_id", "commit must be a full 40-character lowercase hexadecimal SHA-1")
@@ -377,11 +488,12 @@ def build_manifest(commit: str, fmt: str, entries: list[dict], limits: Limits) -
     }
 
 
-def failure_manifest(code: str, message: str, commit: str | None) -> dict:
+def failure_manifest(code: str, message: str, commit: str | None, status: str = "failed") -> dict:
+    """A non-result manifest: ``failed`` after a scan error, ``incomplete`` while a scan runs."""
     return {
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "arc-scout", "version": TOOL_VERSION},
-        "status": "failed",
+        "status": status,
         "error": {"code": code, "message": message},
         "subject": {"commit": commit if isinstance(commit, str) and FULL_SHA1.fullmatch(commit) else None},
         "entries": [],

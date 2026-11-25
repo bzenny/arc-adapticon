@@ -1,7 +1,14 @@
 """Command line: ``python -m arc_scout inventory --git-dir D --commit SHA --output F``.
 
-Exit status: 0 complete manifest written; 1 scan failed (a ``status: failed``
-manifest replaces the output); 2 usage error (nothing written).
+Exit status (callers must check it; only exit 0 with ``status: complete`` is a result):
+  0  complete manifest written
+  1  scan failed: a ``status: failed`` manifest replaced the output
+  2  usage or preflight refusal: nothing written, an existing output is untouched
+  3  output could not be written: the output was invalidated (``status: incomplete``)
+     or removed where possible; any remaining file must not be used
+Before a valid scan starts, the output is atomically replaced with a
+``status: incomplete`` manifest, so an earlier success cannot survive an
+interrupted or failed run.
 """
 
 from __future__ import annotations
@@ -70,6 +77,20 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=args.timeout,
     )
     started = datetime.datetime.now(datetime.timezone.utc)
+    pending = inv.serialize(inv.failure_manifest(
+        "scan_in_progress", "scan started and has not finished; this is not a result", args.commit,
+        status="incomplete"))
+    for target in (output, run_record):
+        if target is None:
+            continue
+        try:
+            inv.write_atomic(target, pending)
+        except OSError as exc:
+            removed = _remove_stale(target)
+            print(f"arc-scout: error [output_unwritable]: cannot invalidate {target}: {exc.strerror or exc}; "
+                  f"earlier file {'removed' if removed else 'NOT removed and must not be used'}", file=sys.stderr)
+            return 3
+
     try:
         manifest = inv.inventory(git_dir, args.commit, git_executable=args.git_executable, limits=limits)
         code = 0
@@ -81,7 +102,12 @@ def main(argv: list[str] | None = None) -> int:
         traceback.print_exc()
         manifest = inv.failure_manifest("internal_error", "unexpected internal error", args.commit)
         code = 1
-    inv.write_atomic(output, inv.serialize(manifest))
+    try:
+        inv.write_atomic(output, inv.serialize(manifest))
+    except OSError as exc:
+        print(f"arc-scout: error [output_unwritable]: cannot write {output}: {exc.strerror or exc}; "
+              "it still holds the status: incomplete placeholder", file=sys.stderr)
+        return 3
 
     if run_record is not None:
         record = {
@@ -97,8 +123,23 @@ def main(argv: list[str] | None = None) -> int:
             "output": str(output.resolve()),
             "limits": vars(limits),
         }
-        inv.write_atomic(run_record, inv.serialize(record))
+        try:
+            inv.write_atomic(run_record, inv.serialize(record))
+        except OSError as exc:
+            print(f"arc-scout: error [output_unwritable]: cannot write run record: {exc.strerror or exc}",
+                  file=sys.stderr)
+            return 3
     return code
+
+
+def _remove_stale(path: Path) -> bool:
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
 
 
 if __name__ == "__main__":

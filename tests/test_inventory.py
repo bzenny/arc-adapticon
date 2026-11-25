@@ -459,5 +459,300 @@ class T15FailClosed(Base):
         self.assertIn(b"--commit", r.stdout)
 
 
+# --- PUSH 004.1 regression tests (FR-005 / P004 preliminary review items 1-4) ---
+
+
+class T06bMalformedTrees(Base):
+    def test_duplicate_entries_rejected(self):
+        repo = self.f["repo"]
+        a, b = repo.blob(b"one\n"), repo.blob(b"two\n")
+        tree = repo.raw_tree([("100644", b"dup.txt", a), ("100644", b"dup.txt", b), ("100644", b"ok", a)])
+        self.assertFails("malformed_tree", repo.commit(tree, "dup\n"))
+
+    def test_file_and_directory_with_same_path_rejected(self):
+        repo = self.f["repo"]
+        sub = repo.tree({"x": b"x\n"})
+        tree = repo.raw_tree([("100644", b"a", repo.blob(b"a\n")), ("40000", b"a", sub)])
+        self.assertFails("malformed_tree", repo.commit(tree, "conflict\n"))
+
+    def test_drive_qualified_and_stream_paths_omitted(self):
+        repo = self.f["repo"]
+        spec = {"C:evil.txt": b"x\n", "D:": {"x.txt": b"x\n"}, "notes.txt:stream": b"x\n", "fine.txt": b"x\n"}
+        m = self.scan(repo.commit(repo.tree(spec), "drive\n"))
+        by = {e["path"]: e for e in m["entries"]}
+        for p in ("C:evil.txt", "D:/x.txt", "notes.txt:stream"):
+            with self.subTest(path=p):
+                self.assertEqual(by[p]["omission_reason"], "unsafe_path")
+        self.assertEqual(by["fine.txt"]["disposition"], "included")
+
+    def test_classify_drive_forms(self):
+        for raw in (b"C:/x", b"c:x", b"a/b:c", b"Z:"):
+            with self.subTest(raw=raw):
+                self.assertEqual(inv.classify_path(raw, inv.Limits())[1], "unsafe_path")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+    except OSError:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+
+class T08bProcessTermination(Base):
+    def _fake_git(self, body: str) -> Path:
+        path = self.root / "fake-git"
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return path
+
+    def _timed(self, git: Path, limit: float = 1.0) -> float:
+        import time
+        t0 = time.monotonic()
+        self.assertFails("timeout", git_executable=str(git), limits=inv.Limits(timeout_seconds=limit))
+        return time.monotonic() - t0
+
+    def _pid(self) -> int:
+        import time
+        f = self.root / "pid"
+        for _ in range(100):
+            if f.exists() and f.read_text().strip():
+                return int(f.read_text())
+            time.sleep(0.05)
+        self.fail("descendant pid not written")
+
+    def _wait_dead(self, pid: int) -> bool:
+        import time
+        for _ in range(50):
+            if not _alive(pid):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def test_descendant_holding_stdout_after_leader_exits(self):
+        git = self._fake_git(f'sleep 30 &\necho $! > "{self.root / "pid"}"\nexit 0\n')
+        self.assertLess(self._timed(git), 4)
+        self.assertTrue(self._wait_dead(self._pid()), "descendant in Git's process group survived")
+
+    def test_descendant_holding_only_stderr(self):
+        git = self._fake_git(f'sleep 30 >/dev/null &\necho $! > "{self.root / "pid"}"\nexit 0\n')
+        self.assertLess(self._timed(git), 4)
+        self.assertTrue(self._wait_dead(self._pid()))
+
+    def test_escaped_descendant_cannot_extend_deadline(self):
+        # A descendant that leaves Git's session is out of reach of killpg; Scout still returns on time.
+        code = "import os,time; os.setsid(); time.sleep(30)"
+        git = self._fake_git(f'"{sys.executable}" -c "{code}" &\necho $! > "{self.root / "pid"}"\nexit 0\n')
+        try:
+            self.assertLess(self._timed(git), 4)
+        finally:
+            try:
+                os.kill(self._pid(), 9)
+            except ProcessLookupError:
+                pass
+
+    def test_flooding_output_is_cut_off(self):
+        git = self._fake_git("exec yes\n")
+        self.assertFails("output_limit", git_executable=str(git), limits=inv.Limits(max_git_output_bytes=1 << 16))
+
+    def test_non_posix_refused(self):
+        with mock.patch.object(inv.os, "name", "nt"):
+            self.assertFails("unsupported_platform")
+
+
+class T12bFixtureBoundary(Base):
+    def _config(self, text: str) -> None:
+        with open(self.git_dir / "config", "a") as fh:
+            fh.write(text)
+
+    def _logged_scan_fails(self, code: str) -> None:
+        log = self.root / "argv.log"
+        wrapper = self.root / "logging-git"
+        wrapper.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\nexec "{fx.GIT}" "$@"\n')
+        wrapper.chmod(0o755)
+        self.assertFails(code, git_executable=str(wrapper))
+        self.assertFalse(log.exists(), "Git ran before the subject config was checked")
+
+    def test_includes_rejected_before_any_git_call(self):
+        canary = self.root / "inc.cfg"
+        canary.write_text(f"[core]\n\tfsmonitor = {self.root / 'nope'}\n")
+        for text in (f"[include]\n\tpath = {canary}\n", f'[includeIf "gitdir:/"]\n\tpath = {canary}\n',
+                     f"[INCLUDE]\n\tpath = {canary}\n"):
+            with self.subTest(text=text.splitlines()[0]):
+                original = (self.git_dir / "config").read_text()
+                self._config(text)
+                self._logged_scan_fails("config_include_unsupported")
+                (self.git_dir / "config").write_text(original)
+
+    def test_partial_clone_configuration_variants(self):
+        for text in ('[Remote "o"]\n\tPromisor = true\n', "[core]\n\tpartialCloneFilter = blob:none\n",
+                     "[extensions]\n\tpartialClone = o\n", '[remote "o"] partialclonefilter = blob:none\n'):
+            with self.subTest(text=text):
+                original = (self.git_dir / "config").read_text()
+                self._config(text)
+                self.assertFails("partial_clone_unsupported")
+                (self.git_dir / "config").write_text(original)
+
+    def test_protocol_overrides_and_extensions_rejected(self):
+        for text in ("[protocol]\n\tallow = always\n", '[protocol "file"]\n\tallow = always\n',
+                     "[protocol.ext]\n\tallow = always\n", "[extensions]\n\tworktreeConfig = true\n"):
+            with self.subTest(text=text):
+                original = (self.git_dir / "config").read_text()
+                self._config(text)
+                self.assertFails("config_unsupported")
+                (self.git_dir / "config").write_text(original)
+        for proto in ("file", "git", "ssh", "http", "https", "ext"):
+            self.assertIn(f"protocol.{proto}.allow=never", inv.GIT_GLOBAL_OPTIONS)
+
+    def test_unparseable_config_rejected(self):
+        for text in ("this is [not valid\n", "[core\n", "[core] = x\n"):
+            with self.subTest(text=text):
+                original = (self.git_dir / "config").read_text()
+                self._config(text)
+                self.assertFails("config_unsupported")
+                (self.git_dir / "config").write_text(original)
+        (self.git_dir / "config").write_text("bare = true\n")
+        self.assertFails("config_unsupported")
+
+    def test_benign_config_syntax_accepted(self):
+        self._config('# comment\n; comment\n[remote "origin"]\n\turl = https://example.invalid/r.git # note\n'
+                     '[branch.main]\n\tremote = origin\n[user] name = "A # B"\n[alias]\n\tx = !echo \\\n  hi\n')
+        self.assertEqual(self.scan()["status"], "complete")
+
+    def test_alternate_object_stores_rejected(self):
+        info = self.git_dir / "objects" / "info"
+        info.mkdir(exist_ok=True)
+        for name in ("alternates", "http-alternates"):
+            with self.subTest(name=name):
+                (info / name).write_text(str(self.root) + "\n")
+                self._logged_scan_fails("alternates_unsupported")
+                (info / name).unlink()
+
+    def test_linked_and_shared_layouts_rejected(self):
+        for name in ("commondir", "config.worktree"):
+            with self.subTest(name=name):
+                (self.git_dir / name).write_text("..\n")
+                self.assertFails("unsupported_layout")
+                (self.git_dir / name).unlink()
+
+    def test_objects_symlink_rejected(self):
+        real = self.root / "real-objects"
+        (self.git_dir / "objects").rename(real)
+        (self.git_dir / "objects").symlink_to(real)
+        self.assertFails("unsupported_layout")
+
+    def test_gitfile_and_headless_dirs_rejected(self):
+        work = self.root / "linked"
+        work.mkdir()
+        (work / ".git").write_text(f"gitdir: {self.git_dir}\n")
+        with self.assertRaises(inv.ScoutError) as cm:
+            inv.inventory(work / ".git", self.f["c2"])
+        self.assertEqual(cm.exception.code, "not_a_git_dir")
+        (self.git_dir / "HEAD").unlink()
+        self.assertFails("not_a_git_dir")
+
+
+class T15bInvalidation(Base):
+    def _complete(self, out: Path) -> None:
+        r = cli("inventory", "--git-dir", str(self.git_dir), "--commit", self.f["c2"], "--output", str(out))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(out.read_text())["status"], "complete")
+
+    def test_interrupted_run_leaves_incomplete_not_stale_success(self):
+        import signal
+        import time
+        out = self.out / "m.json"
+        self._complete(out)
+        slow = self.root / "slow-git"
+        slow.write_text(f'#!/bin/sh\nsleep 2\nexec "{fx.GIT}" "$@"\n')
+        slow.chmod(0o755)
+        base = {"PATH": os.environ.get("PATH", os.defpath), "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPATH": str(REPO_ROOT)}
+        proc = subprocess.Popen([sys.executable, "-m", "arc_scout", "inventory", "--git-dir", str(self.git_dir),
+                                 "--commit", self.f["c2"], "--output", str(out), "--git", str(slow)],
+                                cwd=REPO_ROOT, env=base, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(200):
+                if json.loads(out.read_text())["status"] == "incomplete":
+                    break
+                time.sleep(0.02)
+            proc.send_signal(signal.SIGKILL)
+            proc.wait(timeout=10)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+        m = json.loads(out.read_text())
+        self.assertEqual((m["status"], m["error"]["code"]), ("incomplete", "scan_in_progress"))
+        self.assertEqual(m["entries"], [])
+        self.assertEqual([p.name for p in self.out.iterdir()], ["m.json"])
+
+    def test_final_write_failure_keeps_placeholder_and_exits_3(self):
+        import arc_scout.__main__ as cli_mod
+        out = self.out / "m.json"
+        self._complete(out)
+        real = inv.write_atomic
+        calls = []
+
+        def flaky(path, data):
+            calls.append(path)
+            if len(calls) > 1:
+                raise OSError(28, "No space left on device")
+            real(path, data)
+
+        with mock.patch.object(inv, "write_atomic", flaky), mock.patch("sys.stderr"):
+            code = cli_mod.main(["inventory", "--git-dir", str(self.git_dir), "--commit", self.f["c2"],
+                                 "--output", str(out)])
+        self.assertEqual(code, 3)
+        self.assertEqual(json.loads(out.read_text())["status"], "incomplete")
+
+    def test_preflight_write_failure_removes_stale_success(self):
+        import arc_scout.__main__ as cli_mod
+        out = self.out / "m.json"
+        self._complete(out)
+        with mock.patch.object(inv, "write_atomic", side_effect=OSError(13, "Permission denied")), \
+                mock.patch("sys.stderr"):
+            code = cli_mod.main(["inventory", "--git-dir", str(self.git_dir), "--commit", self.f["c2"],
+                                 "--output", str(out)])
+        self.assertEqual(code, 3)
+        self.assertFalse(out.exists())
+
+    def test_unwritable_directory_reports_exit_3(self):
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        locked = self.root / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        try:
+            r = cli("inventory", "--git-dir", str(self.git_dir), "--commit", self.f["c2"],
+                    "--output", str(locked / "m.json"))
+        finally:
+            locked.chmod(0o700)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn(b"output_unwritable", r.stderr)
+
+    def test_preflight_refusal_leaves_existing_output_untouched(self):
+        out = self.out / "m.json"
+        self._complete(out)
+        before = out.read_bytes()
+        r = cli("inventory", "--git-dir", str(self.git_dir), "--commit", self.f["c2"], "--output", str(out),
+                "--max-entries", "0")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(out.read_bytes(), before)
+
+    def test_run_record_is_invalidated_too(self):
+        out, rec = self.out / "m.json", self.out / "run.json"
+        rec.write_text('{"status": "complete"}\n')
+        r = cli("inventory", "--git-dir", str(self.git_dir), "--commit", "0" * 40, "--output", str(out),
+                "--run-record", str(rec))
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(json.loads(rec.read_text())["status"], "failed")
+
+
 if __name__ == "__main__":
     unittest.main()
