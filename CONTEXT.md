@@ -1,9 +1,9 @@
 # Project context
 
-This file states the repository as it is after its most recent merge. Every PR updates it to its own post-merge state (see [governance](GOVERNANCE.md)).
+This file states the repository as it will be once the PR that last changed it merges (see [governance](GOVERNANCE.md)). It describes expected state, not evidence: a merge, check or cold walk counts as done only when the [event ledger](lineage/EVENTS.jsonl) records it.
 
-**Current state:** M0 foundation complete in documentation. PUSH 003 (PR #3, branch `push-003-final-contextual-foundation`) is the final documentation-only push; its merge commit is recorded in the [event ledger](lineage/EVENTS.jsonl). No Scout runtime or product code exists.
-**Next permitted action:** Check that the M1 entry gates in [governance](GOVERNANCE.md) are recorded as met in the event ledger (fresh Claude and Codex cold walks 6/6, or a recorded founder deferral). Then M1 step 1 (local fixture scanner and JSON manifest, per the [Scout protocol](research/scout-protocol.md)) may start, but only with its own founder authorization.
+**Current state:** M0 foundation documentation is expected to be complete once PR #3 merges. PUSH 003 (PR #3, branch `push-003-final-contextual-foundation`) is intended as the final documentation-only push. Its merge is to be recorded as a new ledger event after it happens; if the ledger has no such event, PR #3 is not merged. No Scout runtime or product code exists.
+**Next permitted action:** Check that the M1 entry gates in [governance](GOVERNANCE.md) are recorded as met in the event ledger (including fresh Claude and independent Codex cold walks, each 6/6). Then M1 step 1 (local fixture scanner and JSON manifest, per the [Scout protocol](research/scout-protocol.md)) may start, but only with its own founder authorization.
 **May I implement Scout now?** No, not until both conditions above hold. Research and decisions are not execution authority.
 **History:** [lineage](lineage/CONTEXT.md). **Authority:** [governance](GOVERNANCE.md), [decisions](decisions/CONTEXT.md). **Reviews and open findings:** [research](research/CONTEXT.md).
 

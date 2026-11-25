@@ -6,7 +6,7 @@ One record per decision; amendments supersede rather than erase.
 - [D-003](D-003-license.md)
 - [D-004](D-004-icm-architect.md)
 - [D-005](D-005-scout-toolchain.md) Scout toolchain: adopt, optional adapters, defer
-- [D-006](D-006-implementer-reviewer-separation.md) Implementer and reviewer must be different agents
+- [D-006](D-006-implementer-reviewer-separation.md) Implementer and reviewer must be different agents (ratified)
 
 Check: distinguish authorization from implementation and verification.
 

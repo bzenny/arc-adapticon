@@ -2,9 +2,9 @@
 
 - **ID:** D-006
 - **Date:** 2026-11-25
-- **Status:** proposed (becomes ratified if the founder merges PUSH 003; the merge event records it)
+- **Status:** ratified (founder, 2026-11-25; ledger event ARC-EVO-0034)
 - **Proposer:** Claude, implementing PUSH 003, from the founder direction below
-- **Authority:** founder direction to Claude, 2026-11-25: "beyond review capacity, if you have the ability to execute where chatgpt struggles, try to implment when directed." Recorded as ledger event ARC-EVO-0032.
+- **Authority:** founder direction to Claude, 2026-11-25: "beyond review capacity, if you have the ability to execute where chatgpt struggles, try to implment when directed." Recorded as ledger event ARC-EVO-0032. Ratification, 2026-11-25: "I formally ratify D-006 — Implementer and Reviewer Separation. Either ChatGPT, Claude or another suitably capable agent may implement when directed by the founder. Independent review must be conducted by an agent that did not prepare the candidate. The founder retains consequential decision-making and merge authority." (ARC-EVO-0034)
 - **Supersedes:** none (refines the role description in D-002 Rev. 1 interim control 3)
 - **Affected paths and milestones:** [GOVERNANCE.md](../GOVERNANCE.md); all milestones
 
@@ -14,7 +14,7 @@ D-002 Rev. 1 names ChatGPT as implementer and Claude as independent reviewer. Th
 
 ## Decision
 
-Either agent may implement when the founder directs. A candidate's review counts as independent only when performed by an agent other than the one that prepared it. Tests and the founder's review remain the checks independent of both models.
+ChatGPT, Claude or another suitably capable agent may implement when directed by the founder. Independent review must be conducted by an agent that did not prepare the candidate. The founder retains consequential decision-making and merge authority. Tests and the founder's review remain the checks independent of both models.
 
 ## Alternatives considered
 
