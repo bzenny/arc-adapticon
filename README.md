@@ -28,6 +28,6 @@ Git and GitHub are the developmental spine and event-response infrastructure; po
 
 ## Roadmap
 
-M0 foundation and review; M1 Scout; M2 capability contracts; M3 governed execution; M4 local model intelligence; M5 adaptive selection experiments; M6 upstream event responses; M7 workbench and specialist lanes; M8 reproducible public release. These are proposed gates. See the decision and research shelves for blockers.
+See [current milestone and roadmap](CONTEXT.md).
 
-Brand clearance pending. Development uses the single founder account under D-002 Rev. 1; procedural review is not technical identity separation. No claim of completed cold walks or independent review of this candidate.
+Brand clearance pending. Development uses the single founder account under D-002 Rev. 1; procedural review is not technical identity separation. P001 was merged after FR-002 review and founder authorization. See [current state](CONTEXT.md) for the P002 candidate and remaining gates. No Scout runtime exists.

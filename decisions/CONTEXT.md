@@ -7,3 +7,5 @@ One record per decision; amendments supersede rather than erase.
 - [D-004](D-004-icm-architect.md)
 
 Check: distinguish authorization from implementation and verification.
+
+Use [decision template](../_templates/decision.md) for new records. Amend with explicit supersession.
