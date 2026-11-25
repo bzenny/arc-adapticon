@@ -6,7 +6,7 @@ Objective: source-grounded integration assessment of a bounded public Git reposi
 
 1. Acquire: explicit HTTPS GitHub owner/repo and full SHA; isolated temporary bare repository with hooks, filters, submodules, credential helpers and external protocols disabled; bounded time/disk/process/memory; verify actual commit. No checkout. Reject unsupported input and redirects outside allowlist. Prove hardening before enabling network acquisition.
 2. Inventory: git ls-tree and bounded cat-file reads; reject symlinks, submodules and unsafe names; no source execution. Manifest path, blob SHA, size and omissions. Begin with trusted synthetic local Git fixtures.
-3. Extract: data-only manifest parsers; declared dependencies and license evidence, not legal conclusions or runtime claims. Unsupported ecosystem remains unknown.
+3. Extract: prefer vetted optional upstream adapters per [toolchain assessment](scout-toolchain.md); do not rebuild mature license/dependency analyzers. Inventory manifest paths as observations only; unsupported or unavailable analysis remains unknown. No legal conclusions or runtime claims.
 4. Project: upstream System Map checked slices (inventory, catalog, nouns, actual processes, impact, reverify). Small tree: context and index only. Larger tree: evidenced cards. Keep live/leftover/ghost/undetermined independent of observed/inferred/unknown/contradicted. Observed declaration is not runtime proof. Claims cite commit, path, blob, line span; inference gives rationale and supporting IDs. Never mutate subject.
 5. Assess: capability, evidence, constraints, license, compatibility, risk, integration option. Hard exclusions before ranking. Missing evidence unknown; no unsupported scores. Human chooses adopt/adapt/reference/reject/revisit.
 6. Export: Markdown and JSON manifest, coverage, omissions, evidence and limitations; deterministic ordering; no secrets. HTML later with escaped text and no remote executable content. Failed checks stop advancement.
@@ -28,4 +28,4 @@ H1: im-ICM improves evidence-supported architecture and integration answer accur
 
 ## First implementation order
 
-Local fixture scanner and JSON manifest; safe pinned acquisition; deterministic extraction and compact map; evidence matrix/export; comparative experiment. Each step separately authorized and checked. No product code until M0 merge.
+Local fixture scanner and JSON manifest; safe pinned acquisition; deterministic extraction and compact map; evidence matrix/export; comparative experiment. Each step separately authorized and checked. No product code until P002 is merged and M0 acceptance gates in [governance](../GOVERNANCE.md) are satisfied.
