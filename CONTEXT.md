@@ -1,15 +1,15 @@
 # Project context
 
-This file states the repository as it will be once the PR that last changed it merges (see [governance](GOVERNANCE.md)). It describes expected state, not evidence: a merge, check or cold walk counts as done only when the [event ledger](lineage/EVENTS.jsonl) records it.
+This file states the repository as it will be once the PR that last changed it merges (see [governance](GOVERNANCE.md)). GitHub is authoritative for actual repository state; the [event ledger](lineage/EVENTS.jsonl) records evidence of it. A gate counts as met only when the ledger records it. If a merge has no ledger receipt, verify it on GitHub and record the missing receipt.
 
-**Current state:** M0 foundation documentation is expected to be complete once PR #3 merges. PUSH 003 (PR #3, branch `push-003-final-contextual-foundation`) is intended as the final documentation-only push. Its merge is to be recorded as a new ledger event after it happens; if the ledger has no such event, PR #3 is not merged. No Scout runtime or product code exists.
-**Next permitted action:** Check that the M1 entry gates in [governance](GOVERNANCE.md) are recorded as met in the event ledger (including fresh Claude and independent Codex cold walks, each 6/6). Then M1 step 1 (local fixture scanner and JSON manifest, per the [Scout protocol](research/scout-protocol.md)) may start, but only with its own founder authorization.
-**May I implement Scout now?** No, not until both conditions above hold. Research and decisions are not execution authority.
+**Current state:** M0 foundation documentation is complete: PR #3 merged as `bd7e488` (ARC-EVO-0043). The M0 closeout PR (#4) records acceptance evidence and the J-01A and J-05 corrections. M0 is **not closed**: the independent Codex cold walk (I-06) has not been run. No Scout runtime or product code exists.
+**Next permitted action:** Run the independent Codex cold walk (six questions in [FR-003](research/reviews/FR-003-push-002-review.md)) against the current main head and record it in the ledger. When every M1 entry gate in [governance](GOVERNANCE.md) is recorded as met, record M0 closure; then PUSH 004, M1 step 1 (local inventory and JSON manifest, per the [Scout protocol](research/scout-protocol.md)), may start under the founder's conditional authorization (ARC-EVO-0040).
+**May I implement Scout now?** No, not until all M1 entry gates are recorded as met. Research and decisions are not execution authority.
 **History:** [lineage](lineage/CONTEXT.md). **Authority:** [governance](GOVERNANCE.md), [decisions](decisions/CONTEXT.md). **Reviews and open findings:** [research](research/CONTEXT.md).
 
 | Milestone | Scope | Gate notes |
 |---|---|---|
-| M0 | Contextual foundation and review | Closes with PUSH 003 and the M1 entry gates |
+| M0 | Contextual foundation and review | PUSH 003 merged; closes when the M1 entry gates are recorded (Codex walk open) |
 | M1 | Scout local read-only discovery and im-ICM | Early step: vet ScanCode and Syft adapters (D-005) |
 | M2 | Capability contracts | No weighted utility ranking until the F-02 utility P1 is resolved |
 | M3 | Governed execution | Blocked by sandbox-sequencing P1 (F-03) |
