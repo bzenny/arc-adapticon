@@ -22,3 +22,4 @@
 {"id":"ARC-EVO-0022","date":"2026-11-25","event":"PR #1 merged; exact parent and tree verified","status":"verified","commit":"d52afe68d5ecc59c887fa5d8353f33bfef293d45","supersedes":[]}
 {"id":"ARC-EVO-0023","date":"2026-11-25","event":"Active ruleset 28052575 verified; target includes all branches; no bypass; zero approvals","status":"verified","commit":"d52afe68d5ecc59c887fa5d8353f33bfef293d45","supersedes":[]}
 {"id":"ARC-EVO-0024","date":"2026-11-25","event":"Founder authorized PUSH 002 documentation candidate","status":"authorized","commit":"d52afe68d5ecc59c887fa5d8353f33bfef293d45","supersedes":[]}
+{"id":"ARC-EVO-0025","date":"2026-11-25","event":"Ruleset 28052575 retargeted to the default branch only; configuration and successful feature branch publication independently verified","status":"verified","commit":"574a9063a080d69d715c735d05065556ff3a5bad","supersedes":["ARC-EVO-0023"]}
