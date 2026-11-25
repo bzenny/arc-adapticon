@@ -1,6 +1,6 @@
 # Scout toolchain — adopt-or-defer assessment
 
-Source inspection 2026-11-25, official upstream documentation; no binaries installed, no tests run, no versions approved. These are proposed implementation decisions, not founder ratification of new dependencies.
+Source inspection 2026-11-25, official upstream documentation; no binaries installed, no tests run, no versions approved. Ratified as [D-005](../decisions/D-005-scout-toolchain.md): ScanCode and Syft are optional adapters subject to vetting, OSV-Scanner deferred. This does not authorize installation or execution of the proposed adapters.
 
 | Tool | Decision | Rationale |
 |---|---|---|

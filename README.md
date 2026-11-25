@@ -30,4 +30,6 @@ Git and GitHub are the developmental spine and event-response infrastructure; po
 
 See [current milestone and roadmap](CONTEXT.md).
 
-Brand clearance pending. Development uses the single founder account under D-002 Rev. 1; procedural review is not technical identity separation. P001 was merged after FR-002 review and founder authorization. See [current state](CONTEXT.md) for the P002 candidate and remaining gates. No Scout runtime exists.
+Brand clearance pending. Development uses the single founder account under D-002 Rev. 1; procedural review is not technical identity separation. P001 was merged after FR-002 review and founder authorization. P002 merged after FR-003 review. See [current state](CONTEXT.md) for PUSH 003 and the M1 entry gates. No Scout runtime exists.
+
+Copyright 2026 bzenny and Arc-Adapticon contributors. ARC-owned material is licensed under the [Apache License 2.0](LICENSE); vendored code keeps its upstream notice.
