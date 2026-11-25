@@ -84,4 +84,10 @@ Condensed by the implementing session: read log and per-question file counts are
 
 ## Independent Codex cold walk (I-06) — not run
 
-No Codex session, CLI or credentials exist in the Claude implementing environment, and the instrument must not be simulated by another Claude session. The gate stays open and is not deferred (ARC-EVO-0037). M0 is therefore not closed and no M1 product code has been written.
+No Codex session, CLI or credentials exist in the Claude implementing environment, and the instrument must not be simulated by another Claude session. The gate stayed open (ARC-EVO-0037) and no M1 product code was written.
+
+**Update:** the founder then deferred this requirement for M1 entry (ARC-EVO-0048). The walk stays part of ARC-EXP-000 and is to be run when an independent Codex environment is operational. The deferral waives no other requirement.
+
+## Closeout-head Claude cold walk
+
+Same agent type, instrument and method, on a `git archive` export of `b18019befa8a81fa54106933d20aa060e01ba1e7`. Reads: AGENTS.md, CONTEXT.md, GOVERNANCE.md, _templates/decision.md, lineage/CONTEXT.md (five). Q1 CONTEXT.md (1); Q2 GOVERNANCE.md (1); Q3 _templates/decision.md (1); Q4 CONTEXT.md, GOVERNANCE.md (2); Q5 CONTEXT.md (1); Q6 lineage/CONTEXT.md (1). **6/6 within budget**, all answers correct. New P3 observations: CONTEXT.md's next action did not say the Claude walk was done; "PR #4" and "PUSH 004" share a number; event-status wording in AGENTS.md and lineage/CONTEXT.md differs slightly in form, not meaning.
