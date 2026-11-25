@@ -6,5 +6,6 @@
 - [ICM Architect upstream assessment](icm-architect.md)
 - [Scout protocol](scout-protocol.md)
 - [Scout toolchain](scout-toolchain.md)
+- [P004 inventory spec](p004-inventory-spec.md): M1 step 1 contract, Git allowlist, tests T01 to T15
 
 M3 sandbox sequencing P1; M5 logging and utility-function P1s. Distinguish source, inference, hypothesis and measured results. Research is not execution authority.
