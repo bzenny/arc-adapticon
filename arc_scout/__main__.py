@@ -46,23 +46,45 @@ def build_parser() -> argparse.ArgumentParser:
 def _check_destination(parser: argparse.ArgumentParser, label: str, path: Path, git_dir: Path) -> None:
     if not path.parent.is_dir():
         parser.error(f"{label}: directory does not exist: {path.parent}")
-    if path.is_dir():
-        parser.error(f"{label}: is a directory: {path}")
-    if git_dir.is_dir() and inv.output_inside_subject(path, git_dir.resolve()):
+    if path.is_symlink():
+        parser.error(f"{label}: final-component symlinks are not supported")
+    if path.exists() and not path.is_file():
+        parser.error(f"{label}: must be a regular file: {path}")
+    if inv.output_inside_subject(path, git_dir):
         parser.error(f"{label}: must be outside the subject repository")
+
+
+def _check_subject_layout(parser: argparse.ArgumentParser, git_dir: Path) -> None:
+    # Never write to a possibly misidentified worktree or shared object store.
+    # Ordinary non-repository inputs still produce the normal failed manifest.
+    if git_dir.is_symlink() or git_dir.is_file():
+        parser.error("--git-dir: symlinks and gitfiles are not supported")
+    markers = ("HEAD", "objects", "config", "commondir", "config.worktree")
+    if git_dir.is_dir() and any((git_dir / name).exists() or (git_dir / name).is_symlink()
+                                for name in markers):
+        try:
+            inv.check_layout(git_dir.resolve())
+        except (inv.ScoutError, OSError) as exc:
+            parser.error(f"--git-dir: unsupported fixture layout: {exc}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    for name in ("max_entries", "max_path_bytes", "max_git_output_bytes"):
-        if getattr(args, name) < 1:
-            parser.error(f"--{name.replace('_', '-')} must be positive")
-    if args.timeout <= 0:
-        parser.error("--timeout must be positive")
+    limits = inv.Limits(
+        max_entries=args.max_entries,
+        max_path_bytes=args.max_path_bytes,
+        max_git_output_bytes=args.max_git_output_bytes,
+        timeout_seconds=args.timeout,
+    )
+    try:
+        inv.validate_limits(limits)
+    except inv.ScoutError as exc:
+        parser.error(exc.message)
 
     output = Path(args.output)
     git_dir = Path(args.git_dir)
+    _check_subject_layout(parser, git_dir)
     _check_destination(parser, "--output", output, git_dir)
     run_record = Path(args.run_record) if args.run_record else None
     if run_record is not None:
@@ -70,12 +92,6 @@ def main(argv: list[str] | None = None) -> int:
         if run_record.resolve() == output.resolve():
             parser.error("--run-record must differ from --output")
 
-    limits = inv.Limits(
-        max_entries=args.max_entries,
-        max_path_bytes=args.max_path_bytes,
-        max_git_output_bytes=args.max_git_output_bytes,
-        timeout_seconds=args.timeout,
-    )
     started = datetime.datetime.now(datetime.timezone.utc)
     pending = inv.serialize(inv.failure_manifest(
         "scan_in_progress", "scan started and has not finished; this is not a result", args.commit,

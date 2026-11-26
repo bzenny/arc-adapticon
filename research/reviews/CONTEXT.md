@@ -10,10 +10,11 @@ Independent reviews, one file per review. Records are evidence, not authority; d
 | FR-003 | PUSH 002 at 574a906, addendum PUSH 002.1 at 4b91340 | APPROVE WITH NON-BLOCKING FINDINGS; addendum APPROVE FOR MERGE; M1 not yet | [FR-003](FR-003-push-002-review.md) | Authored in Markdown by the reviewing agent, addendum included |
 | FR-004 | PUSH 003/003.1 at fee697d | APPROVE WITH NON-BLOCKING FINDINGS; addendum: exact-head checks pass; gates open | [FR-004](FR-004-push-003-review.md) | Verbatim PR #3 comment bodies fetched by REST API |
 | FR-005 | M0 closeout (PR #4) at 027becc, with M0 closure receipt | APPROVE FOR MERGE; merged as a67c3c5 | [FR-005](FR-005-m0-closeout-review.md) | Verbatim PR #4 comment bodies fetched by REST API |
-| P004 preliminary | PUSH 004 (PR #5) at 5098fb0 | Preliminary items 1-3, no disposition; final review is FR-006 | [preliminary](P004-preliminary-review.md) | Verbatim PR #5 comment body fetched by REST API |
+| P004 preliminary | PUSH 004 (PR #5) at 5098fb0 | Preliminary items 1-3, no disposition; later FR-006 | [preliminary](P004-preliminary-review.md) | Verbatim PR #5 comment body fetched by REST API |
+| FR-006 | PUSH 004/004.1 at 76e746b | REQUEST BOUNDED CORRECTIONS (K-01, K-02); P004.2 prepared, independent reassessment pending | [FR-006](FR-006-p004-review.md) | Verbatim PR #5 comment body fetched by REST API |
 
 Implementer evidence (not review): [M0 acceptance evidence](M0-acceptance-evidence.md): merge receipt, deterministic checks, final-head Claude cold walk, Codex blocker.
 
 Earlier partial summaries: [FR-001](FR-001.md), [FR-002](FR-002.md), both superseded. Reconciliations: [FR-001](../FR-001.md), [FR-002](../FR-002.md), [FR-003](../FR-003.md), [FR-004](../FR-004.md).
 
-Reviewer for FR-001 to FR-003: Claude. PUSH 003 was prepared by Claude, so under [D-006](../../decisions/D-006-implementer-reviewer-separation.md) FR-004 and FR-005 came from ChatGPT. PUSH 004 and 004.1 are prepared by Claude; their review (FR-006) comes from ChatGPT.
+Reviewer for FR-001 to FR-003: Claude. PUSH 003 was prepared by Claude, so under [D-006](../../decisions/D-006-implementer-reviewer-separation.md) FR-004 and FR-005 came from ChatGPT. PUSH 004 and 004.1 were prepared by Claude; their review (FR-006 at 76e746b) comes from ChatGPT. ChatGPT prepared the bounded P004.2 amendment; the new head requires an eligible separate reviewer, retaining the earlier independent review and distinct implementer evidence.

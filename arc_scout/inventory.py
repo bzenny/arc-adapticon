@@ -10,6 +10,7 @@ not a sandbox for hostile repositories and not a network-isolation guarantee.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import select
@@ -29,6 +30,7 @@ DEFAULT_MAX_PATH_BYTES = 4096
 DEFAULT_MAX_COMPONENT_BYTES = 255
 DEFAULT_MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 60.0
+MAX_TIMEOUT_SECONDS = 3600.0
 MAX_STDERR_BYTES = 64 * 1024
 
 FULL_SHA1 = re.compile(r"[0-9a-f]{40}")
@@ -96,6 +98,22 @@ class Limits:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
 
+def validate_limits(limits: Limits) -> None:
+    """Reject invalid or excessive limits before any subprocess is started."""
+    for name, maximum in (
+        ("max_entries", DEFAULT_MAX_ENTRIES),
+        ("max_path_bytes", DEFAULT_MAX_PATH_BYTES),
+        ("max_component_bytes", DEFAULT_MAX_COMPONENT_BYTES),
+        ("max_git_output_bytes", DEFAULT_MAX_GIT_OUTPUT_BYTES),
+    ):
+        value = getattr(limits, name)
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise ScoutError("invalid_limits", f"{name} must be an integer between 1 and {maximum}")
+    value = limits.timeout_seconds
+    if type(value) not in (int, float) or not 0 < value <= MAX_TIMEOUT_SECONDS or not math.isfinite(value):
+        raise ScoutError("invalid_limits", f"timeout must be finite, positive and at most {MAX_TIMEOUT_SECONDS:g} seconds")
+
+
 @dataclass
 class GitRunner:
     """Runs allowlisted Git commands with a sanitized environment."""
@@ -109,6 +127,7 @@ class GitRunner:
         return sanitized_environment()
 
     def run(self, *args: str) -> bytes:
+        validate_limits(self.limits)
         check_allowed(args)
         argv = [self.git_executable, f"--git-dir={self.git_dir}", *GIT_GLOBAL_OPTIONS, *args]
         self.calls.append(tuple(args))
@@ -131,6 +150,11 @@ class GitRunner:
 
         try:
             out, err, code = self._collect(proc, args[0])
+        except BaseException:
+            # Includes unexpected select/read errors and KeyboardInterrupt.
+            # All collection failures share the same bounded cleanup path.
+            _terminate(proc)
+            raise
         finally:
             for pipe in (proc.stdout, proc.stderr):
                 try:
@@ -157,7 +181,6 @@ class GitRunner:
         while fds:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                _terminate(proc)
                 raise ScoutError("timeout", f"git {sub} exceeded {self.limits.timeout_seconds} s")
             ready, _, _ = select.select(list(fds), [], [], remaining)
             for fd in ready:
@@ -171,7 +194,6 @@ class GitRunner:
                 buf = fds[fd]
                 if buf is out:
                     if len(out) + len(chunk) > cap:
-                        _terminate(proc)
                         raise ScoutError("output_limit", f"git {sub} output exceeded {cap} bytes")
                     out.extend(chunk)
                 elif len(err) < MAX_STDERR_BYTES:
@@ -179,7 +201,6 @@ class GitRunner:
         try:
             code = proc.wait(timeout=max(deadline - time.monotonic(), 0.001))
         except subprocess.TimeoutExpired:
-            _terminate(proc)
             raise ScoutError("timeout", f"git {sub} exceeded {self.limits.timeout_seconds} s") from None
         return bytes(out), bytes(err), code
 
@@ -247,6 +268,8 @@ def find_git(git_executable: str | None) -> str:
 
 def resolve_git_dir(git_dir: str | os.PathLike) -> Path:
     path = Path(git_dir)
+    if path.is_symlink():
+        raise ScoutError("unsupported_layout", "Git directory must not be a symlink")
     if not path.is_dir():
         raise ScoutError("not_a_git_dir", "Git directory does not exist")
     return path.resolve()
@@ -332,15 +355,30 @@ def check_layout(git_dir: Path) -> None:
     config = git_dir / "config"
     if config.is_symlink() or not config.is_file():
         raise ScoutError("unsupported_layout", "config missing or a symlink")
-    check_config(parse_git_config(config.read_bytes()))
+    items = parse_git_config(config.read_bytes())
+    check_config(items)
+    if any(section == "core" and key == "worktree" for section, _, key, _ in items):
+        raise ScoutError("unsupported_layout", "explicit core.worktree is not supported")
+    bare_values = [value for section, sub, key, value in items
+                   if section == "core" and sub is None and key == "bare"]
+    # Require the ordinary git-init layout instead of guessing a worktree root.
+    if len(bare_values) != 1 or bare_values[0] is None:
+        raise ScoutError("unsupported_layout", "fixture must declare one explicit core.bare value")
+    bare = re.split(r"[#;]", bare_values[0], maxsplit=1)[0].strip().lower()
+    if bare not in ("true", "false") or (bare == "false" and git_dir.name != ".git"):
+        raise ScoutError("unsupported_layout", "expected a bare repository or ordinary non-linked .git directory")
 
 
 def output_inside_subject(output: Path, git_dir: Path) -> bool:
-    out = output.resolve()
-    roots = [git_dir]
-    if git_dir.name == ".git":
-        roots.append(git_dir.parent)
-    return any(out == r or r in out.parents for r in roots)
+    # os.replace/unlink act on the directory entry, not the final symlink target.
+    # Resolve both, and protect both the supplied and resolved subject roots.
+    roots = set()
+    for root in (git_dir.parent.resolve() / git_dir.name, git_dir.resolve()):
+        roots.add(root)
+        if root.name == ".git":
+            roots.add(root.parent)
+    destinations = (output.parent.resolve() / output.name, output.resolve())
+    return any(out == root or root in out.parents for root in roots for out in destinations)
 
 
 def classify_path(raw: bytes, limits: Limits) -> tuple[str | None, str | None]:
@@ -423,6 +461,7 @@ def inventory(
     runner_factory=GitRunner,
 ) -> dict:
     """Return the canonical manifest for ``commit`` or raise ScoutError."""
+    validate_limits(limits)
     if os.name != "posix":
         raise ScoutError("unsupported_platform", "Scout P004 supports POSIX systems only")
     git = find_git(git_executable)

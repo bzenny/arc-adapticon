@@ -1,6 +1,6 @@
 # P004 — ARC Scout local inventory (M1 step 1)
 
-Status: candidate implementation (PUSH 004 with the PUSH 004.1 corrections), prepared by Claude. It requires independent review (FR-006, ChatGPT) and separate founder merge authorization. Scope source: [FR-004](reviews/FR-004-push-003-review.md) P004 scope and addendum refinements; authorization ARC-EVO-0051. Corrections: [P004 preliminary review](reviews/P004-preliminary-review.md) items 1 to 3. Stage 2 (Inventory) of the [Scout protocol](scout-protocol.md), for trusted local fixtures only.
+Status: candidate implementation (PUSH 004 and 004.1 prepared by Claude; bounded PUSH 004.2 amendment prepared by ChatGPT). [FR-006](reviews/FR-006-p004-review.md) requested corrections K-01 and K-02 at the earlier head. The amended head requires independent reassessment by an agent that did not prepare the amendment, with prior review provenance retained, and separate exact-head founder merge authorization. Scope source: [FR-004](reviews/FR-004-push-003-review.md) P004 scope and addendum refinements; authorization ARC-EVO-0051. Corrections: [P004 preliminary review](reviews/P004-preliminary-review.md) items 1 to 3. Stage 2 (Inventory) of the [Scout protocol](scout-protocol.md), for trusted local fixtures only.
 
 ## Interface
 
@@ -15,17 +15,20 @@ python -m arc_scout inventory --git-dir ./fixture.git --commit <40-hex SHA-1> --
 | 0 | Complete | `status: complete` manifest |
 | 1 | Scan failed | `status: failed` manifest with `error.code` |
 | 2 | Usage or preflight refusal | Nothing written; any existing file untouched |
-| 3 | Output could not be written | `status: incomplete` placeholder, or removed; if neither was possible, the stderr message says the old file must not be used |
+| 3 | Output or run record could not be written | `status: incomplete` placeholder or removed where possible; an old file may remain if invalidation and removal both fail. If the optional run-record final write fails, a current complete manifest may exist, but the invocation is unsuccessful. Always check exit status and stderr. |
 
 Only exit 0 with `status: complete` is a result. Callers must check the exit status.
 
 **Invalidation before scanning.** After argument and destination checks pass (exit 2 otherwise), Scout atomically replaces the output, and the run record if one was requested, with a `status: incomplete` manifest (`error.code: scan_in_progress`). Only then does it scan, and it finishes by atomically writing `complete` or `failed`. A run that is killed, interrupted or fails to write its final result therefore leaves `incomplete`, never an earlier success (T15b). If the placeholder cannot be written, Scout tries to remove the old file and exits 3.
 
-Preflight refusals (exit 2):
-- output directory missing, or output is a directory
-- output inside the subject Git directory, or inside the worktree of a `.git` directory
+Preflight refusals (exit 2; no output writes, removals or Git invocations):
+- either output parent is missing, final destination is a symlink (including dangling links), or existing destination is not a regular file
+- either destination's actual directory entry (resolved parent plus leaf) or dereferenced target is inside the supplied or resolved subject Git directory or ordinary `.git` worktree
 - run record equal to the output
-- non-positive limits
+- symlinked Git directory, gitfile, or a recognizable Git-like directory failing the layout/config checks below; ordinary missing or empty non-repository input can still produce a failed manifest outside the subject
+- invalid or excessive limits; see bounds below
+
+This preflight protects both manifest and run record before either is touched. It assumes a trusted, stable filesystem and is not resistant to concurrent hostile path replacement.
 
 ## Supported platforms and fixture layouts
 
@@ -35,12 +38,12 @@ Preflight refusals (exit 2):
 - a self-contained bare repository
 - the `.git` directory of a non-linked repository
 
-Each must contain a `HEAD` file, a real `objects` directory (not a symlink) and a regular `config` file. These are refused:
+Each must contain a `HEAD` file, a real `objects` directory (not a symlink) and a regular `config` file. Require exactly one explicit ordinary `core.bare = true` or `false` (unquoted, case-insensitive, optional comments); `false` is supported only for an ordinary `.git` directory. Explicit `core.worktree`, nonstandard non-bare Git directories, linked layouts and a final Git-directory symlink are refused instead of guessing a subject root. These are refused:
 
 | Condition | Code |
 |---|---|
 | `.git` is a file (gitfile, linked worktree, submodule), or `HEAD` or `objects` missing | `not_a_git_dir` |
-| `commondir` or `config.worktree` present, `objects` or `config` is a symlink, `config` missing | `unsupported_layout` |
+| `commondir` or `config.worktree` present, Git directory/`objects`/`config` is a symlink, `config` missing, ambiguous `core.bare` or explicit `core.worktree`, non-bare directory not named `.git` | `unsupported_layout` |
 | `objects/info/alternates` or `objects/info/http-alternates` present | `alternates_unsupported` |
 | `*.promisor` pack present | `partial_clone_unsupported` |
 
@@ -54,7 +57,7 @@ Each must contain a `HEAD` file, a real `objects` directory (not a symlink) and 
 | Any `protocol` section | `config_unsupported` |
 | Unparseable line, non-UTF-8, key outside a section | `config_unsupported` |
 
-Other keys are allowed and are pinned by the global options below where they could matter.
+Other keys are allowed and are pinned by the global options below where they could matter. P004.2 performs these checks before writing output for recognizable Git layouts; the callable API retains its stable ScoutError codes, while CLI preflight refusal exits 2 without writing.
 
 ## Trust boundary and security limits
 
@@ -67,6 +70,7 @@ T09 and T10 show that this metadata slice does not read repository text into Sco
 
 ## Order of checks
 
+0. Validate all Limits values before subprocess launch; failure → `invalid_limits` in the callable API or exit 2 at CLI preflight.
 1. Platform must be POSIX → else `unsupported_platform`.
 2. Locate Git (`--git` or `PATH`) → missing gives `git_not_found`.
 3. `--git-dir` must be an existing directory → else `not_a_git_dir`.
@@ -86,10 +90,10 @@ T09 and T10 show that this metadata slice does not read repository text into Sco
 
 ## Process bounds
 
-Each Git call runs in its own session. Scout reads stdout and stderr in a single-threaded `select` loop against one absolute deadline (`--timeout`).
+Each Git call runs in its own session. Scout reads stdout and stderr in a single-threaded `select` loop against one absolute deadline (`--timeout`). Both CLI and callable inventory/runner validate limits before spawning: timeout finite and positive, at most 3,600 seconds; integer entries/path bytes/component bytes/Git stdout bytes in 1..100,000 / 4,096 / 255 / 67,108,864 respectively. Boolean and non-integer values are not accepted as integer limits. The integer ceilings deliberately retain the previous default maxima.
 
 - When the deadline passes, or stdout exceeds `--max-git-output-bytes`, Scout kills the whole process group. It then reaps Git, waiting at most 5 s, and returns `timeout` or `output_limit`.
-- A descendant that keeps a pipe open after Git exits cannot extend the deadline (T08b).
+- Unexpected collection exceptions and interrupts take the same bounded termination/reaping path before re-raising; pipes close in the finally block. A descendant that keeps a pipe open after Git exits cannot extend the deadline (T08b).
 - A descendant that left Git's session is not killed, but Scout stops reading and returns on time. stderr is capped at 64 KiB.
 
 ## Authorized Git commands
@@ -166,11 +170,11 @@ Each entry has `path`, `mode`, `type`, `object_id`, `size_bytes` and `dispositio
 
 **Determinism.** Entries are sorted by raw path bytes. JSON uses sorted keys, two-space indent, ASCII escapes and a trailing newline. The manifest holds no timestamps, absolute paths or environment data; those go only in the optional `--run-record`. The same input and tool version give byte-identical output (T02).
 
-**Atomic writes.** Scout writes a temporary file in the output directory, fsyncs it, then calls `os.replace`. On error the temporary file is removed and any earlier file is left whole. The pre-scan invalidation above guarantees that the whole file is never a stale success.
+**Atomic writes.** Scout writes a temporary file in the output directory, fsyncs it, then calls `os.replace`. On error the temporary file is removed and any earlier file is left whole. After successful pre-scan invalidation, a failed scan write leaves the incomplete placeholder rather than an earlier success. Preflight refusal, storage failure, or an optional run-record final-write failure are governed by the exit table; callers must check the exit code.
 
 ## Acceptance tests
 
-`python -m unittest discover -s tests -v`: 66 tests.
+`python -m unittest discover -s tests -v`: 79 tests (original 66 unchanged plus 13 P004.2 regressions).
 
 | ID | Requirement | Test class |
 |---|---|---|
@@ -193,8 +197,13 @@ Each entry has `path`, `mode`, `type`, `object_id`, `size_bytes` and `dispositio
 | T14 | Real argv captured by a logging Git wrapper equals the allowlist exactly; other commands refused | `T14Allowlist` |
 | T15 | Failure replaces an earlier success; every failure code writes a failed manifest; an interrupted write keeps the old file; usage errors write nothing | `T15FailClosed` |
 | T15b | A run killed mid-scan leaves `incomplete`; a failed final write leaves `incomplete` and exits 3; a failed placeholder removes the stale success; an unwritable directory exits 3; preflight refusal leaves the output untouched; the run record is invalidated too | `T15bInvalidation` |
+| K-01 / K-02 | Internal/external/dangling output and run-record symlinks, symlinked parent, ordinary and ambiguous worktrees, gitfiles, non-bare non-.git layouts, invalid finite bounds at CLI/API/runner, real-child cleanup after unexpected collector failure and KeyboardInterrupt, normal manifest contract | `FR006Regression` in [test_fr006.py](../tests/test_fr006.py) |
 
 `T15b.test_unwritable_directory_reports_exit_3` skips when run as root, because root ignores directory permissions. Run the suite as an unprivileged user to exercise it.
+
+### P004.2 implementer verification (not independent review)
+
+Python 3.13.5, Git 2.47.3, Linux. Reconstructed original runtime and original 66-test/fixture files from the exact 76e746b GitHub blobs; all original Python blob IDs verified before editing. `python -W error::ResourceWarning -m unittest discover -s tests -v`: 79 tests, 78 passed, one root-only skip, zero failures/errors. Ran the skipped permission case separately as `nobody`: pass. Repeated the entire suite in a network namespace (`unshare -rn`) in two batches (39 and 40 tests), same one root-only skip, zero failures/errors; a probe to a documentation-range address returned ENETUNREACH (errno 101). Running `runuser` inside that namespace was not permitted; the separate unprivileged test ran outside it. Source/test blobs in the candidate must match the locally tested bytes: inventory.py d55e0eb6a35027f00c658f8cfdf77c518ba1ea4a; __main__.py 92e46afef6790b8cb53d84a8295b839dbe206cb9; test_fr006.py 65ea42bc4e7706fbac7fd5372e10d05d68345174. Original tests/test_inventory.py 009df61f90cfc797c62afd21898adf1b5a112fa8 and tests/fixtures.py 55955273d2871375dc7b640c0e0d2ceb9de9f04f remain unchanged. No live remote acquisition, hostile-repo sandbox, macOS or Windows validation is claimed.
 
 These are slice-level checks. They do not complete Scout S-1 to S-8 or ARC-EXP-001.
 
