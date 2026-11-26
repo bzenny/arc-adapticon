@@ -1,6 +1,6 @@
 # ARC-ADA agent entry
 
-Arc-Adapticon (ARC) is a proposed open, model-independent workbench that discovers, assesses and reuses computational capabilities; it is in founding phase M0 and no product runtime exists yet. Its first product will be ARC Scout, a local read-only repository assessment tool.
+Arc-Adapticon (ARC) is a proposed open, model-independent workbench that discovers, assesses and reuses computational capabilities; M0 is closed and M1 has begun: the only runtime is ARC Scout's local metadata inventory. Its first product will be ARC Scout, a local read-only repository assessment tool.
 
 Start with [current state](CONTEXT.md). Route directly by task; do not read the whole tree.
 
@@ -13,6 +13,7 @@ Start with [current state](CONTEXT.md). Route directly by task; do not read the 
 | Project history; proposal vs implemented | [lineage](lineage/CONTEXT.md) (status meanings, then origin and event ledger) |
 | Research, blockers and independent reviews | [research](research/CONTEXT.md) |
 | Scout design and tools | [protocol](research/scout-protocol.md), [toolchain](research/scout-toolchain.md) |
+| Scout code and tests | [package](arc_scout/CONTEXT.md), [tests](tests/CONTEXT.md), [inventory spec](research/p004-inventory-spec.md) |
 | Human overview | [README](README.md) |
 
 Decisions: copy the template to `decisions/D-NNN-slug.md` (fields ID, Date, Status, Proposer, Authority, Supersedes, Affected paths; sections Problem, Decision, Alternatives, Rationale, Consequences, Verification); status is proposed, ratified, rejected or superseded. History: [origin](lineage/ORIGIN.md) and the [event ledger](lineage/EVENTS.jsonl). Event status: recorded = documented observation or proposal; pending = unresolved proposal; ratified = authorized policy; authorized = approved action, not necessarily performed; implemented = completed action; verified = completed check; superseded = replaced or closed by a later event. Decision status is separate (above). Ratified is not implemented.
